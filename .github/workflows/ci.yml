@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install Rust tools
+        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - name: Install zsh if missing
+        if: runner.os == 'Linux'
+        run: |
+          if ! command -v zsh >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y zsh
+          fi
+      - name: Check formatting and lint
+        run: |
+          cargo +stable fmt --all -- --check
+          cargo +stable clippy --locked --all-targets -- -D warnings
+          zsh -n shell/t.zsh
+      - name: Run Rust tests
+        run: cargo +stable test --locked --all-targets
+      - name: Run interactive zsh tests
+        run: |
+          cargo +stable build --locked
+          python3 tests/zsh_integration.py target/debug/t-helper

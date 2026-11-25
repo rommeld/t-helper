@@ -1,0 +1,153 @@
+"""Exercise the zsh hook and built Rust binary through a real terminal."""
+
+import os
+from pathlib import Path
+import pty
+import re
+import select
+import shlex
+import shutil
+import signal
+import sys
+import tempfile
+import time
+import unittest
+
+
+ROOT = Path(__file__).resolve().parent.parent
+PROMPT = re.compile(rb"__t_test_(\d+)__ ")
+BINARY = Path(sys.argv.pop(1)).resolve() if len(sys.argv) > 1 else ROOT / "target/debug/t-helper"
+
+
+class InteractiveZsh:
+    def __init__(self, env):
+        zsh = shutil.which("zsh")
+        if not zsh:
+            raise RuntimeError("zsh is required to run the interactive tests")
+        self.pid, self.fd = pty.fork()
+        if self.pid == 0:
+            os.execve(zsh, [zsh, "-f", "-i"], env)
+        self.pending = b""
+
+    def close(self):
+        try:
+            os.kill(self.pid, signal.SIGHUP)
+        except ProcessLookupError:
+            pass
+        os.close(self.fd)
+        os.waitpid(self.pid, 0)
+
+    def command(self, line):
+        os.write(self.fd, (line + "\n").encode())
+        return self.read_prompt()
+
+    def read_prompt(self):
+        deadline = time.monotonic() + 10
+        if match := PROMPT.search(self.pending):
+            # A prompt prefix can be present without the final ZLE escape sequence.
+            return self.take_prompt(match)
+        while time.monotonic() < deadline:
+            ready, _, _ = select.select([self.fd], [], [], max(0, deadline - time.monotonic()))
+            if not ready:
+                break
+            data = os.read(self.fd, 8192)
+            if not data:
+                break
+            self.pending += data
+            if match := PROMPT.search(self.pending):
+                return self.take_prompt(match)
+        raise AssertionError(f"No prompt for test shell; received {self.pending!r}")
+
+    def take_prompt(self, match):
+        output = self.pending[: match.start()].decode(errors="replace").replace("\r", "")
+        self.pending = self.pending[match.end() :]
+        return output, int(match.group(1))
+
+
+class ShellTest(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        bin_dir = Path(temp.name) / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "t-helper").symlink_to(BINARY)
+        self.shell = InteractiveZsh(
+            {
+                "PATH": os.pathsep.join([str(bin_dir), "/usr/bin", "/bin"]),
+                "HOME": temp.name,
+                "ZDOTDIR": temp.name,
+                "TERM": "dumb",
+                "PS1": "__t_test_%?__ ",
+                "LC_ALL": "C",
+            }
+        )
+        self.addCleanup(self.shell.close)
+        self.shell.read_prompt()
+        self.start = f"source {shlex.quote(str(ROOT / 'shell/t.zsh'))}"
+
+    def run_line(self, line, status=0, contains=None):
+        output, actual = self.shell.command(line)
+        if status is not None:
+            self.assertEqual(status, actual, output)
+        if contains:
+            self.assertIn(contains, output)
+        return output
+
+    def test_failure_success_and_repeat(self):
+        self.run_line(self.start)
+        self.run_line("t", contains="No previous command")
+        self.run_line("function git { print 'fixture ran'; return 1; }")
+        self.run_line("git statsu", status=1, contains="fixture ran")
+        output = self.run_line("t", contains="Try: git status")
+        self.assertNotIn("fixture ran", output)
+        self.run_line("t", contains="The previous command succeeded.")
+        self.run_line("false", status=1)
+        self.run_line("true")
+        self.run_line("t", contains="The previous command succeeded.")
+
+    def test_private_command_invalidates_older_failure(self):
+        self.run_line("setopt HIST_IGNORE_SPACE")
+        self.run_line(self.start)
+        self.run_line("gti status", status=127)
+        self.run_line(" kubctl get pods", status=127)
+        output = self.run_line("t", contains="No previous command")
+        self.assertNotIn("kubctl", output)
+        self.assertNotIn("gti", output)
+
+    def test_parse_error_never_reuses_previous_failure(self):
+        self.run_line(self.start)
+        self.run_line("gti status", status=127)
+        self.run_line("true )", status=None, contains="parse error")
+        self.run_line("t", contains="No previous command")
+
+    def test_pipeline_reports_only_overall_status(self):
+        self.run_line(self.start)
+        self.run_line("gti | false", status=1)
+        output = self.run_line("t", contains="Exit status 1. Cannot tell why")
+        self.assertNotIn("git", output)
+
+    def test_coexists_with_prompt_hooks_and_can_be_sourced_twice(self):
+        self.run_line("precmd() { :; }; autoload -Uz add-zsh-hook")
+        self.run_line("test_prompt_hook() { :; }; add-zsh-hook precmd test_prompt_hook")
+        self.run_line(self.start)
+        self.run_line(self.start)
+        self.run_line("gti status", status=127)
+        self.run_line("t", contains="Exit status 127. `gti` looks like a typo for `git`.")
+
+    def test_does_not_replace_an_existing_alias(self):
+        self.run_line("alias t='print -- existing-alias'")
+        self.run_line(self.start, status=1, contains="t already exists")
+        self.run_line("t", contains="existing-alias")
+
+    def test_uses_the_binary_only_when_needed(self):
+        self.run_line(self.start)
+        self.run_line("PATH=/usr/bin:/bin; true")
+        self.run_line("t", contains="The previous command succeeded.")
+        self.run_line("false", status=1)
+        self.run_line("t", status=1, contains="binary not found on PATH")
+
+
+if __name__ == "__main__":
+    if not BINARY.is_file():
+        raise SystemExit(f"Build t-helper first: no binary at {BINARY}")
+    unittest.main(verbosity=2)
