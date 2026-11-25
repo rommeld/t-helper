@@ -37,7 +37,9 @@ If you already have a command or alias named `t`, rename or remove it before you
 
 `t` recognizes common shell mistakes, selected macOS command patterns, and known typos in Git, Homebrew, Docker, Docker Compose, and kubectl. When a tool's exit status is ambiguous, `t` can suggest a check such as `docker context show`. For pipelines and compound commands, it reports the overall status without guessing which part failed.
 
-`t` keeps only the latest command context in the current shell. It does not search shell history, record output, write logs, or use the network. Your shell's existing history and logging settings still apply. With `HIST_IGNORE_SPACE` enabled, `t` skips commands that start with a space. A successful command or an intervening prompt replaces the old failure.
+`t` keeps the latest command context in the current shell. It checks that the exact history event is still in zsh's in-memory history before sending the command to the local rule engine. It does not search for older commands, record output, write logs, or use the network.
+
+`t` skips commands zsh drops from its in-memory history. That includes leading-space commands and alias expansions with `HIST_IGNORE_SPACE` enabled, and commands rejected by a `zshaddhistory` hook. A hook that only prevents writing a command to the history file leaves it available in memory. If a prompt hook fails or `t` cannot verify the history event, it does not reuse an older failure.
 
 The diagnosis uses the command as typed. `t` does not resolve aliases, wrapper commands such as `sudo`, or substitutions. A syntax error can return to the prompt before zsh tells `t` what command was entered. In that case, `t` has no command to diagnose.
 

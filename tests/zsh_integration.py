@@ -114,6 +114,50 @@ class ShellTest(unittest.TestCase):
         self.assertNotIn("kubctl", output)
         self.assertNotIn("gti", output)
 
+    def test_alias_that_expands_to_a_private_line_is_skipped(self):
+        self.run_line("setopt HIST_IGNORE_SPACE")
+        self.run_line("alias hidden_failure=' false'")
+        self.run_line(self.start)
+        self.run_line("gti status", status=127)
+        self.run_line("hidden_failure", status=1)
+        self.run_line("t", contains="No previous command")
+
+    def test_history_hook_opt_out_is_skipped(self):
+        self.run_line("zshaddhistory() { [[ $1 != 'false private-marker'* ]]; }")
+        self.run_line(self.start)
+        self.run_line("gti status", status=127)
+        self.run_line("false private-marker", status=1)
+        self.run_line("t", contains="No previous command")
+        self.run_line("false", status=1)
+        self.run_line("t", contains="Exit status 1. Cannot tell why")
+
+    def test_history_check_handles_literal_metacharacters_and_duplicates(self):
+        self.run_line("setopt HIST_IGNORE_DUPS")
+        self.run_line(self.start)
+        self.run_line("function git { return 1; }")
+        for _ in range(2):
+            self.run_line("git statsu '[file]*'", status=1)
+        self.run_line("t", contains="Replace `statsu` with `status`")
+
+    def test_shared_history_does_not_replace_the_local_capture(self):
+        peer = ShellTest()
+        self.addCleanup(peer.doCleanups)
+        peer.setUp()
+        with tempfile.TemporaryDirectory() as temp:
+            history = shlex.quote(str(Path(temp) / "shared-history"))
+            setup = f"HISTFILE={history}; SAVEHIST=100; setopt SHARE_HISTORY"
+            self.run_line(setup)
+            peer.run_line(setup)
+            self.run_line(self.start)
+            self.run_line("gti status", status=127)
+            peer.run_line("true")
+            self.run_line("t", contains="Exit status 127. `gti` looks like a typo for `git`.")
+
+            self.run_line("zshaddhistory() { [[ $1 != 'false private-marker'* ]]; }")
+            self.run_line("false private-marker", status=1)
+            peer.run_line("false private-marker", status=1)
+            self.run_line("t", contains="No previous command")
+
     def test_parse_error_never_reuses_previous_failure(self):
         self.run_line(self.start)
         self.run_line("gti status", status=127)
