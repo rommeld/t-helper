@@ -9,11 +9,18 @@ if (( ${+aliases[t]} || ${+galiases[t]} || ${+functions[t]} || ${+builtins[t]} )
 fi
 
 typeset -g +x _t_helper_pending='' _t_helper_command='' _t_helper_status=''
+typeset -gi +x _t_helper_awaiting_prompt=0
 
 function _t_helper_preexec {
     # preexec can still receive leading-space commands with HIST_IGNORE_SPACE set.
     local ignore_space=${options[histignorespace]}
     emulate -L zsh
+    # A previous prompt hook may have errored before our precmd could run.
+    if (( _t_helper_awaiting_prompt )); then
+        _t_helper_command=''
+        _t_helper_status=''
+    fi
+    _t_helper_awaiting_prompt=1
     _t_helper_pending=''
     if [[ -n ${1-} && ( $ignore_space != on || $1 != ' '* ) ]]; then
         _t_helper_pending=$1
@@ -34,6 +41,7 @@ function _t_helper_precmd {
         fi
     fi
     _t_helper_pending=''
+    _t_helper_awaiting_prompt=0
     return 0
 }
 

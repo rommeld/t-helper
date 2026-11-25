@@ -134,6 +134,15 @@ class ShellTest(unittest.TestCase):
         self.run_line("gti status", status=127)
         self.run_line("t", contains="Exit status 127. `gti` looks like a typo for `git`.")
 
+    def test_prompt_hook_error_cannot_reuse_older_failure(self):
+        self.run_line("autoload -Uz add-zsh-hook")
+        self.run_line("prompt_error() { (( $? != 1 )) || ${missing:?prompt error}; }")
+        self.run_line("add-zsh-hook precmd prompt_error")
+        self.run_line(self.start)
+        self.run_line("gti status", status=127)
+        self.run_line("false", status=1)
+        self.run_line("t", contains="No previous command")
+
     def test_does_not_replace_an_existing_alias(self):
         self.run_line("alias t='print -- existing-alias'")
         self.run_line(self.start, status=1, contains="t already exists")
