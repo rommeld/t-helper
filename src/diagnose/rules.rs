@@ -15,7 +15,7 @@ pub(super) fn command_not_found(tool: &str) -> Advice {
         }
         _ => {
             return Advice::Hint {
-                message: "If zsh said 'command not found', check the spelling and whether the executable is on PATH.",
+                message: "If your shell said 'command not found', check the spelling and whether the executable is on PATH.",
                 check: None,
             };
         }

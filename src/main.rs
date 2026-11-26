@@ -6,8 +6,8 @@ use std::process::ExitCode;
 use diagnose::{Advice, diagnose};
 
 const MAX_REQUEST_BYTES: usize = 128 * 1024;
-const HELP: &str = "t-helper: local hints for failed zsh commands.\n\
-    Source shell/t.zsh in your interactive zsh, then type t after a failure.";
+const HELP: &str = "t-helper: local hints for failed shell commands.\n\
+    Source shell/t.fish in fish or shell/t.zsh in zsh, then type t after a failure.";
 
 fn main() -> ExitCode {
     let mut args = std::env::args_os().skip(1);

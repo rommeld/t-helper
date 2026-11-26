@@ -1,4 +1,4 @@
-/// Recognize a conservative subset of zsh: literal words with simple quotes.
+/// Recognize literal words with simple quotes, without interpreting shell syntax.
 /// If syntax could affect which command ran, let the caller use a generic hint.
 pub(super) fn literal_words(input: &str) -> Option<Vec<String>> {
     let mut words = Vec::new();

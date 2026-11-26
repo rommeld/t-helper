@@ -22,21 +22,31 @@ jobs:
           persist-credentials: false
       - name: Install Rust tools
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
-      - name: Install zsh if missing
+      - name: Install shells if missing on Linux
         if: runner.os == 'Linux'
         run: |
-          if ! command -v zsh >/dev/null; then
+          if ! command -v zsh >/dev/null || ! command -v fish >/dev/null; then
             sudo apt-get update
-            sudo apt-get install -y zsh
+            sudo apt-get install -y zsh fish
+          fi
+      - name: Install fish if missing on macOS
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+        run: |
+          if ! command -v fish >/dev/null; then
+            brew install fish
           fi
       - name: Check formatting and lint
         run: |
           cargo +stable fmt --all -- --check
           cargo +stable clippy --locked --all-targets -- -D warnings
+          fish -n shell/t.fish
           zsh -n shell/t.zsh
       - name: Run Rust tests
         run: cargo +stable test --locked --all-targets
-      - name: Run interactive zsh tests
+      - name: Run interactive shell tests
         run: |
           cargo +stable build --locked
+          python3 tests/fish_integration.py target/debug/t-helper
           python3 tests/zsh_integration.py target/debug/t-helper

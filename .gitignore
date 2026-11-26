@@ -9,6 +9,7 @@
 !src/**
 
 !shell/
+!shell/t.fish
 !shell/t.zsh
 !tests/
 !tests/*.rs

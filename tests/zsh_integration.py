@@ -2,76 +2,31 @@
 
 import os
 from pathlib import Path
-import pty
-import re
-import select
 import shlex
 import shutil
-import signal
 import sys
 import tempfile
-import time
 import unittest
+
+from shell_pty import InteractiveShell
 
 
 ROOT = Path(__file__).resolve().parent.parent
-PROMPT = re.compile(rb"__t_test_(\d+)__ ")
 BINARY = Path(sys.argv.pop(1)).resolve() if len(sys.argv) > 1 else ROOT / "target/debug/t-helper"
-
-
-class InteractiveZsh:
-    def __init__(self, env):
-        zsh = shutil.which("zsh")
-        if not zsh:
-            raise RuntimeError("zsh is required to run the interactive tests")
-        self.pid, self.fd = pty.fork()
-        if self.pid == 0:
-            os.execve(zsh, [zsh, "-f", "-i"], env)
-        self.pending = b""
-
-    def close(self):
-        try:
-            os.kill(self.pid, signal.SIGHUP)
-        except ProcessLookupError:
-            pass
-        os.close(self.fd)
-        os.waitpid(self.pid, 0)
-
-    def command(self, line):
-        os.write(self.fd, (line + "\n").encode())
-        return self.read_prompt()
-
-    def read_prompt(self):
-        deadline = time.monotonic() + 10
-        if match := PROMPT.search(self.pending):
-            # A prompt prefix can be present without the final ZLE escape sequence.
-            return self.take_prompt(match)
-        while time.monotonic() < deadline:
-            ready, _, _ = select.select([self.fd], [], [], max(0, deadline - time.monotonic()))
-            if not ready:
-                break
-            data = os.read(self.fd, 8192)
-            if not data:
-                break
-            self.pending += data
-            if match := PROMPT.search(self.pending):
-                return self.take_prompt(match)
-        raise AssertionError(f"No prompt for test shell; received {self.pending!r}")
-
-    def take_prompt(self, match):
-        output = self.pending[: match.start()].decode(errors="replace").replace("\r", "")
-        self.pending = self.pending[match.end() :]
-        return output, int(match.group(1))
 
 
 class ShellTest(unittest.TestCase):
     def setUp(self):
+        zsh = shutil.which("zsh")
+        if not zsh:
+            raise RuntimeError("zsh is required to run the interactive tests")
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         bin_dir = Path(temp.name) / "bin"
         bin_dir.mkdir()
         (bin_dir / "t-helper").symlink_to(BINARY)
-        self.shell = InteractiveZsh(
+        self.shell = InteractiveShell(
+            [zsh, "-f", "-i"],
             {
                 "PATH": os.pathsep.join([str(bin_dir), "/usr/bin", "/bin"]),
                 "HOME": temp.name,
@@ -79,7 +34,7 @@ class ShellTest(unittest.TestCase):
                 "TERM": "dumb",
                 "PS1": "__t_test_%?__ ",
                 "LC_ALL": "C",
-            }
+            },
         )
         self.addCleanup(self.shell.close)
         self.shell.read_prompt()

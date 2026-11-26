@@ -33,7 +33,7 @@ pub fn diagnose(command: &str, status: u8) -> Advice {
     match status {
         127 => rules::command_not_found(tool),
         126 => Advice::Hint {
-            message: "If zsh could not execute the command, check its permissions and file type.",
+            message: "If your shell could not execute the command, check its permissions and file type.",
             check: None,
         },
         130 => Advice::Hint {
